@@ -61,8 +61,12 @@ def build_module_interface(ports, generics) -> str:
 
 def build_register_mapping(regmap_path) -> str:
     """
-    Read the _regmap.md file and return its content with the top-level
-    # title stripped (to avoid heading hierarchy conflicts in the README).
+    Read the _regmap.md file and return its content ready to embed inside a
+    ## section of the README:
+      - Strips the top-level # title line
+      - Downgrades ## headings to ### so they don't act as section boundaries
+        for the inject_section logic (registers are sub-sections of
+        ## Register Mapping Information, so ### is also semantically correct)
     """
     from pathlib import Path
     content = Path(regmap_path).read_text(encoding='utf-8')
@@ -70,7 +74,10 @@ def build_register_mapping(regmap_path) -> str:
     lines = content.splitlines(keepends=True)
     if lines and lines[0].startswith('# '):
         lines = lines[1:]
-    return ''.join(lines).lstrip('\n')
+    content = ''.join(lines).lstrip('\n')
+    # Downgrade ## to ### so register headings don't break section injection
+    content = re.sub(r'^## ', '### ', content, flags=re.MULTILINE)
+    return content
 
 
 def build_register_mapping_warning(entity_name: str) -> str:

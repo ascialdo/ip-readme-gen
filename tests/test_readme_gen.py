@@ -193,7 +193,32 @@ class TestBuildRegisterMapping(unittest.TestCase):
         path = self._write_regmap('## REG_CTRL\n\nContent.\n')
         try:
             result = build_register_mapping(path)
-            self.assertIn('## REG_CTRL', result)
+            self.assertIn('REG_CTRL', result)
+        finally:
+            os.unlink(path)
+
+    def test_register_headings_downgraded_to_h3(self):
+        path = self._write_regmap('# Title\n\n## REG_CTRL — Offset `0x0000`\n\nContent.\n\n## REG_STATUS — Offset `0x0004`\n\nContent.\n')
+        try:
+            result = build_register_mapping(path)
+            self.assertNotIn('\n## REG_CTRL', result)
+            self.assertNotIn('\n## REG_STATUS', result)
+            self.assertIn('### REG_CTRL', result)
+            self.assertIn('### REG_STATUS', result)
+        finally:
+            os.unlink(path)
+
+    def test_repeated_injection_does_not_duplicate(self):
+        """Injecting the same section twice must not grow the README."""
+        regmap_content = '# Title\n\n## REG_CTRL\n\nSome field.\n\n## REG_STATUS\n\nAnother field.\n'
+        path = self._write_regmap(regmap_content)
+        try:
+            content = build_register_mapping(path)
+            readme = '# My IP\n\nIntro.\n'
+            result = inject_section(readme, 'Register Mapping Information', content)
+            result = inject_section(result, 'Register Mapping Information', content)
+            self.assertEqual(result.count('## Register Mapping Information'), 1)
+            self.assertEqual(result.count('### REG_CTRL'), 1)
         finally:
             os.unlink(path)
 
