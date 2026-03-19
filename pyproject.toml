@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ip-readme-gen"
+version = "0.1.0"
+description = "Injects module interface and register map sections into a VHDL IP core README"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+ip-readme-gen = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ir", "parser", "injector"]
