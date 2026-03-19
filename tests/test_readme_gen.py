@@ -141,6 +141,28 @@ class TestBuildModuleInterface(unittest.TestCase):
         content = build_module_interface(_sample_ports(), [])
         self.assertNotIn('### Generics', content)
 
+    def test_mapped_ports_excluded(self):
+        mapped = {'duty', 'status'}
+        content = build_module_interface(_sample_ports(), [], mapped_ports=mapped)
+        self.assertNotIn('`duty`', content)
+        self.assertNotIn('`status`', content)
+        self.assertIn('`clk`', content)
+        self.assertIn('`enable`', content)
+
+    def test_unmapped_ports_still_present(self):
+        mapped = {'duty'}
+        content = build_module_interface(_sample_ports(), [], mapped_ports=mapped)
+        self.assertIn('`pwm_out`', content)
+
+    def test_axi4lite_slave_row_present(self):
+        content = build_module_interface(_sample_ports(), [])
+        self.assertIn('AXI4-Lite Slave', content)
+        self.assertIn('slave', content)
+
+    def test_axi4lite_slave_shows_register_width(self):
+        content = build_module_interface(_sample_ports(), [], register_width=64)
+        self.assertIn('64 bit', content)
+
     def test_generic_dependent_port_shows_type_string(self):
         p = Port(
             name='data',
@@ -151,9 +173,9 @@ class TestBuildModuleInterface(unittest.TestCase):
         content = build_module_interface([p], [])
         self.assertIn('std_logic_vector(DATA_WIDTH-1 downto 0)', content)
 
-    def test_empty_inputs_returns_empty_string(self):
+    def test_no_ports_still_has_axi_row(self):
         content = build_module_interface([], [])
-        self.assertEqual(content.strip(), '')
+        self.assertIn('AXI4-Lite Slave', content)
 
 
 # ---------------------------------------------------------------------------

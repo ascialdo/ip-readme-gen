@@ -78,7 +78,7 @@ def _load_config() -> tuple[str, str]:
         print_err(f"top_entity file not found: '{rtl_path}'")
         sys.exit(1)
 
-    return rtl_path
+    return rtl_path, cfg
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -95,8 +95,17 @@ def main() -> int:
         return 1
 
     # Load config
-    rtl_path = _load_config()
+    rtl_path, cfg = _load_config()
     print_info(f"Entity file: {bold(rtl_path)}")
+
+    # Extract mapped ports and register width from config
+    mapped_ports = {
+        fld['port']
+        for reg in cfg.get('registers', {}).values()
+        for fld in reg.get('fields', [])
+        if 'port' in fld
+    }
+    register_width = cfg.get('register_width', 32)
 
     # Parse VHDL entity
     print()
@@ -126,7 +135,7 @@ def main() -> int:
         inject_section,
     )
 
-    interface_content = build_module_interface(ports, generics)
+    interface_content = build_module_interface(ports, generics, mapped_ports, register_width)
 
     if regmap_found:
         regmap_content = build_register_mapping(regmap_path)

@@ -29,11 +29,17 @@ def inject_section(text: str, heading: str, content: str) -> str:
     return text.rstrip('\n') + f'\n\n## {heading}\n\n{content.strip()}\n'
 
 
-def build_module_interface(ports, generics) -> str:
+def build_module_interface(ports, generics,
+                           mapped_ports: set | None = None,
+                           register_width: int = 32) -> str:
     """
     Build the markdown content for the ## Module Interface section.
     Includes a Generics table (if any) and a Ports table.
+
+    Ports that are mapped as AXI registers are excluded from the table.
+    An AXI4-Lite Slave interface row is added at the end of the ports table.
     """
+    mapped_ports = mapped_ports or set()
     sections = []
 
     if generics:
@@ -46,15 +52,16 @@ def build_module_interface(ports, generics) -> str:
             rows.append(f'| `{g.name}` | {g.vhdl_type} | {default} |')
         sections.append('### Generics\n\n' + '\n'.join(rows))
 
-    if ports:
-        rows = [
-            '| Port | Direction | Width |',
-            '|------|-----------|-------|',
-        ]
-        for p in ports:
-            width = p.vhdl_type if p.is_generic_dependent else str(p.width)
-            rows.append(f'| `{p.name}` | {p.direction.value} | {width} |')
-        sections.append('### Ports\n\n' + '\n'.join(rows))
+    visible_ports = [p for p in ports if p.name not in mapped_ports]
+    rows = [
+        '| Port | Direction | Width |',
+        '|------|-----------|-------|',
+    ]
+    for p in visible_ports:
+        width = p.vhdl_type if p.is_generic_dependent else str(p.width)
+        rows.append(f'| `{p.name}` | {p.direction.value} | {width} |')
+    rows.append(f'| AXI4-Lite Slave | slave | {register_width} bit |')
+    sections.append('### Ports\n\n' + '\n'.join(rows))
 
     return '\n\n'.join(sections)
 
