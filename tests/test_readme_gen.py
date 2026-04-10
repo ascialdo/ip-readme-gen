@@ -3,7 +3,6 @@ Tests for ip-readme-gen.
 """
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import unittest
@@ -11,9 +10,11 @@ from pathlib import Path
 
 from ir.model import Direction, AccessType, Port, Generic
 from injector.readme import (
-    inject_section,
+    MARKER,
+    SEPARATOR,
+    inject_generated_block,
     build_module_interface,
-    build_register_mapping,
+    build_compact_regmap,
     build_register_mapping_warning,
 )
 
@@ -50,52 +51,111 @@ def _sample_generics():
     ]
 
 
+def _sample_cfg():
+    return {
+        'top_entity': 'rtl/pwm_ctrl.vhd',
+        'register_width': 32,
+        'registers': {
+            'REG_CTRL': {
+                'offset': '0x00',
+                'fields': [
+                    {'port': 'enable', 'bits': [0, 0], 'access': 'RW'},
+                    {'port': 'duty',   'bits': [8, 1], 'access': 'RW'},
+                ],
+            },
+            'REG_STATUS': {
+                'offset': '0x04',
+                'fields': [
+                    {'port': 'status', 'bits': [3, 0], 'access': 'RO'},
+                ],
+            },
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
-# inject_section
+# inject_generated_block
 # ---------------------------------------------------------------------------
 
-class TestInjectSection(unittest.TestCase):
+class TestInjectGeneratedBlock(unittest.TestCase):
 
-    def test_replaces_existing_section(self):
-        readme = "# My IP\n\nSome intro.\n\n## Module Interface\n\nOld content here.\n\n## Usage\n\nUsage text.\n"
-        result = inject_section(readme, 'Module Interface', 'New content.')
-        self.assertIn('New content.', result)
-        self.assertNotIn('Old content here.', result)
-
-    def test_preserves_other_sections(self):
-        readme = "# My IP\n\n## Module Interface\n\nOld.\n\n## Usage\n\nUsage text.\n"
-        result = inject_section(readme, 'Module Interface', 'New.')
-        self.assertIn('## Usage', result)
-        self.assertIn('Usage text.', result)
-
-    def test_appends_if_section_missing(self):
+    def test_appends_marker_when_absent(self):
         readme = "# My IP\n\nSome intro.\n"
-        result = inject_section(readme, 'Module Interface', 'New content.')
-        self.assertIn('## Module Interface', result)
+        result = inject_generated_block(readme, 'Content.')
+        self.assertIn(MARKER, result)
+        self.assertIn('Content.', result)
+
+    def test_marker_is_after_existing_content(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'Content.')
+        self.assertGreater(result.index(MARKER), result.index('Intro.'))
+
+    def test_replaces_everything_after_existing_marker(self):
+        readme = f"# My IP\n\nIntro.\n\n{SEPARATOR}\n{MARKER}\n\nOld generated content.\n"
+        result = inject_generated_block(readme, 'New generated content.')
+        self.assertIn('New generated content.', result)
+        self.assertNotIn('Old generated content.', result)
+
+    def test_preserves_content_above_marker(self):
+        readme = f"# My IP\n\nCustom section.\n\n{SEPARATOR}\n{MARKER}\n\nOld.\n"
+        result = inject_generated_block(readme, 'New.')
+        self.assertIn('Custom section.', result)
+
+    def test_marker_appears_exactly_once(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'Content.')
+        self.assertEqual(result.count(MARKER), 1)
+
+    def test_repeated_injection_marker_still_once(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'Content.')
+        result = inject_generated_block(result, 'Content.')
+        self.assertEqual(result.count(MARKER), 1)
+
+    def test_repeated_injection_content_not_duplicated(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'My content.')
+        result = inject_generated_block(result, 'My content.')
+        self.assertEqual(result.count('My content.'), 1)
+
+    # ── separator tests ──────────────────────────────────────────────────────
+
+    def test_separator_added_on_first_append(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'Content.')
+        self.assertIn(SEPARATOR, result)
+        # Separator must appear before the marker
+        self.assertLess(result.index(SEPARATOR), result.index(MARKER))
+
+    def test_separator_appears_exactly_once_after_first_run(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'Content.')
+        self.assertEqual(result.count(SEPARATOR + "\n" + MARKER), 1)
+
+    def test_separator_not_duplicated_on_repeat(self):
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, 'Content.')
+        result = inject_generated_block(result, 'Content.')
+        self.assertEqual(result.count(SEPARATOR + "\n" + MARKER), 1)
+
+    def test_user_content_before_separator_is_preserved(self):
+        readme = "# My IP\n\nUser section.\n\nMore user text.\n"
+        result = inject_generated_block(readme, 'Generated.')
+        self.assertIn('User section.', result)
+        self.assertIn('More user text.', result)
+        # User content must appear before the separator
+        self.assertLess(result.index('More user text.'), result.index(SEPARATOR))
+
+    def test_migration_marker_without_separator(self):
+        """README written by an older version of the tool (no separator)."""
+        readme = f"# My IP\n\nIntro.\n\n{MARKER}\n\nOld content.\n"
+        result = inject_generated_block(readme, 'New content.')
         self.assertIn('New content.', result)
-
-    def test_appended_section_is_after_existing_content(self):
-        readme = "# My IP\n\nIntro.\n"
-        result = inject_section(readme, 'Module Interface', 'Content.')
-        self.assertGreater(result.index('## Module Interface'), result.index('Intro.'))
-
-    def test_two_injections_both_present(self):
-        readme = "# My IP\n\nIntro.\n"
-        result = inject_section(readme, 'Module Interface', 'Interface content.')
-        result = inject_section(result, 'Register Mapping Information', 'Regmap content.')
-        self.assertIn('## Module Interface', result)
-        self.assertIn('## Register Mapping Information', result)
-
-    def test_replace_preserves_heading(self):
-        readme = "## Module Interface\n\nOld.\n"
-        result = inject_section(readme, 'Module Interface', 'New.')
-        self.assertIn('## Module Interface', result)
-
-    def test_section_at_end_of_file_no_trailing_heading(self):
-        readme = "# Title\n\n## Module Interface\n\nLast section, no next heading.\n"
-        result = inject_section(readme, 'Module Interface', 'Replaced.')
-        self.assertIn('Replaced.', result)
-        self.assertNotIn('Last section', result)
+        self.assertNotIn('Old content.', result)
+        # After migration the separator must be present
+        self.assertIn(SEPARATOR + "\n" + MARKER, result)
+        # The marker must appear exactly once
+        self.assertEqual(result.count(MARKER), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +163,10 @@ class TestInjectSection(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestBuildModuleInterface(unittest.TestCase):
+
+    def test_contains_module_interface_heading(self):
+        content = build_module_interface(_sample_ports(), [])
+        self.assertIn('## Module Interface', content)
 
     def test_ports_table_present(self):
         content = build_module_interface(_sample_ports(), [])
@@ -154,14 +218,13 @@ class TestBuildModuleInterface(unittest.TestCase):
         content = build_module_interface(_sample_ports(), [], mapped_ports=mapped)
         self.assertIn('`pwm_out`', content)
 
-    def test_axi4lite_slave_row_present(self):
+    def test_no_axi4lite_slave_row(self):
         content = build_module_interface(_sample_ports(), [])
-        self.assertIn('AXI4-Lite Slave', content)
-        self.assertIn('slave', content)
+        self.assertNotIn('AXI4-Lite Slave', content)
 
-    def test_axi4lite_slave_shows_register_width(self):
-        content = build_module_interface(_sample_ports(), [], register_width=64)
-        self.assertIn('64 bit', content)
+    def test_no_ports_still_renders_ports_table(self):
+        content = build_module_interface([], [])
+        self.assertIn('### Ports', content)
 
     def test_generic_dependent_port_shows_type_string(self):
         p = Port(
@@ -173,76 +236,63 @@ class TestBuildModuleInterface(unittest.TestCase):
         content = build_module_interface([p], [])
         self.assertIn('std_logic_vector(DATA_WIDTH-1 downto 0)', content)
 
-    def test_no_ports_still_has_axi_row(self):
-        content = build_module_interface([], [])
-        self.assertIn('AXI4-Lite Slave', content)
-
 
 # ---------------------------------------------------------------------------
-# build_register_mapping
+# build_compact_regmap
 # ---------------------------------------------------------------------------
 
-class TestBuildRegisterMapping(unittest.TestCase):
+class TestBuildCompactRegmap(unittest.TestCase):
 
-    def _write_regmap(self, content: str) -> str:
-        f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, encoding='utf-8')
-        f.write(content)
-        f.close()
-        return f.name
+    def test_contains_register_mapping_heading(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertIn('## Register Mapping Information', result)
 
-    def tearDown(self):
-        # cleanup handled per-test
-        pass
+    def test_register_names_present(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertIn('REG_CTRL', result)
+        self.assertIn('REG_STATUS', result)
 
-    def test_title_stripped(self):
-        path = self._write_regmap('# Register Map — my_entity\n\n## REG_CTRL\n\nContent.\n')
-        try:
-            result = build_register_mapping(path)
-            self.assertNotIn('# Register Map', result)
-            self.assertIn('## REG_CTRL', result)
-        finally:
-            os.unlink(path)
+    def test_offsets_present(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertIn('0x00', result)
+        self.assertIn('0x04', result)
 
-    def test_content_preserved(self):
-        path = self._write_regmap('# Title\n\nSome register content.\n')
-        try:
-            result = build_register_mapping(path)
-            self.assertIn('Some register content.', result)
-        finally:
-            os.unlink(path)
+    def test_field_ports_present(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertIn('enable', result)
+        self.assertIn('duty', result)
+        self.assertIn('status', result)
 
-    def test_no_title_line_unchanged(self):
-        path = self._write_regmap('## REG_CTRL\n\nContent.\n')
-        try:
-            result = build_register_mapping(path)
-            self.assertIn('REG_CTRL', result)
-        finally:
-            os.unlink(path)
+    def test_access_types_present(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertIn('RW', result)
+        self.assertIn('RO', result)
 
-    def test_register_headings_downgraded_to_h3(self):
-        path = self._write_regmap('# Title\n\n## REG_CTRL — Offset `0x0000`\n\nContent.\n\n## REG_STATUS — Offset `0x0004`\n\nContent.\n')
-        try:
-            result = build_register_mapping(path)
-            self.assertNotIn('\n## REG_CTRL', result)
-            self.assertNotIn('\n## REG_STATUS', result)
-            self.assertIn('### REG_CTRL', result)
-            self.assertIn('### REG_STATUS', result)
-        finally:
-            os.unlink(path)
+    def test_bits_notation(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertIn('[0:0]', result)   # enable
+        self.assertIn('[1:8]', result)   # duty  (bits[0]=1 low, bits[1]=8 high)
+        self.assertIn('[0:3]', result)   # status
 
-    def test_repeated_injection_does_not_duplicate(self):
-        """Injecting the same section twice must not grow the README."""
-        regmap_content = '# Title\n\n## REG_CTRL\n\nSome field.\n\n## REG_STATUS\n\nAnother field.\n'
-        path = self._write_regmap(regmap_content)
-        try:
-            content = build_register_mapping(path)
-            readme = '# My IP\n\nIntro.\n'
-            result = inject_section(readme, 'Register Mapping Information', content)
-            result = inject_section(result, 'Register Mapping Information', content)
-            self.assertEqual(result.count('## Register Mapping Information'), 1)
-            self.assertEqual(result.count('### REG_CTRL'), 1)
-        finally:
-            os.unlink(path)
+    def test_register_name_shown_only_on_first_field(self):
+        result = build_compact_regmap(_sample_cfg())
+        self.assertEqual(result.count('REG_CTRL'), 1)
+
+    def test_no_registers_placeholder(self):
+        result = build_compact_regmap({'registers': {}})
+        self.assertIn('No registers defined', result)
+
+    def test_no_registers_key(self):
+        result = build_compact_regmap({})
+        self.assertIn('No registers defined', result)
+
+    def test_repeated_injection_not_duplicated(self):
+        regmap_section = build_compact_regmap(_sample_cfg())
+        readme = "# My IP\n\nIntro.\n"
+        result = inject_generated_block(readme, regmap_section)
+        result = inject_generated_block(result, regmap_section)
+        self.assertEqual(result.count('## Register Mapping Information'), 1)
+        self.assertEqual(result.count(SEPARATOR + "\n" + MARKER), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -257,14 +307,15 @@ class TestBuildRegisterMappingWarning(unittest.TestCase):
 
     def test_contains_warning_keyword(self):
         result = build_register_mapping_warning('my_entity')
-        self.assertLower(result)
-
-    def assertLower(self, text):
-        self.assertIn('warning', text.lower())
+        self.assertIn('Warning', result)
 
     def test_mentions_axi_wrapper_gen(self):
         result = build_register_mapping_warning('my_entity')
         self.assertIn('axi-wrapper-gen', result)
+
+    def test_contains_heading(self):
+        result = build_register_mapping_warning('my_entity')
+        self.assertIn('## Register Mapping Information', result)
 
 
 # ---------------------------------------------------------------------------

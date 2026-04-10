@@ -52,9 +52,6 @@ def print_info(msg): print(f"  {dim('·')} {msg}")
 _CONFIG_FILE = 'axi_config.json'
 _README_FILE = 'README.md'
 
-_SECTION_INTERFACE = 'Module Interface'
-_SECTION_REGMAP    = 'Register Mapping Information'
-
 
 def _load_config() -> tuple[str, str]:
     """Read axi_config.json, return (top_entity_path, raw_json_path)."""
@@ -118,34 +115,21 @@ def main() -> int:
         print_err(f"VHDL parse failed: {e}")
         return 1
 
-    # Locate _regmap.md
-    regmap_path = Path(rtl_path).parent / f"{entity_name}_axi" / f"{entity_name}_regmap.md"
-    regmap_found = regmap_path.exists()
-    if regmap_found:
-        print_ok(f"Register map found: {regmap_path}")
-    else:
-        print_warn(f"Register map not found: {regmap_path}")
-        print_warn("Run axi-wrapper-gen first. A warning will be added to the README.")
-
     # Build section content
     from injector.readme import (
         build_module_interface,
-        build_register_mapping,
-        build_register_mapping_warning,
-        inject_section,
+        build_compact_regmap,
+        inject_generated_block,
     )
 
-    interface_content = build_module_interface(ports, generics, mapped_ports, register_width)
+    interface_section = build_module_interface(ports, generics, mapped_ports)
+    regmap_section    = build_compact_regmap(cfg)
 
-    if regmap_found:
-        regmap_content = build_register_mapping(regmap_path)
-    else:
-        regmap_content = build_register_mapping_warning(entity_name)
+    generated = interface_section + '\n\n' + regmap_section
 
-    # Inject into README
+    # Inject into README (everything below the marker is replaced)
     readme_text = readme_path.read_text(encoding='utf-8')
-    readme_text = inject_section(readme_text, _SECTION_INTERFACE, interface_content)
-    readme_text = inject_section(readme_text, _SECTION_REGMAP, regmap_content)
+    readme_text = inject_generated_block(readme_text, generated)
     readme_path.write_text(readme_text, encoding='utf-8')
 
     print_ok(f"'{_README_FILE}' updated")
